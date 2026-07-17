@@ -1,0 +1,247 @@
+name: Render episode
+
+on:
+  workflow_dispatch:
+    inputs:
+      episode:
+        description: "Episode id (folder name, e.g. episode01)"
+        required: true
+        default: "episode01"
+
+concurrency:
+  group: render-${{ github.event.inputs.episode }}
+  cancel-in-progress: false
+
+env:
+  CI_QUIET: "1"
+
+jobs:
+  prep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    outputs:
+      matrix: ${{ steps.prep.outputs.matrix }}
+      has_blender: ${{ steps.prep.outputs.has_blender }}
+
+    steps:
+      - name: Checkout content repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ secrets.CONTENT_REPO }}
+          token: ${{ secrets.CONTENT_TOKEN }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Cache Node modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      - name: Install Node dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Prepare episode (whisper, timing, plan, shard ranges)
+        id: prep
+        run: python ci.py prep "${{ github.event.inputs.episode }}"
+
+      - name: Upload prep artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: prep
+          path: |
+            out/**
+            public/**
+          if-no-files-found: warn
+          retention-days: 1
+
+  blender:
+    needs: prep
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+
+    steps:
+      - name: Checkout content repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ secrets.CONTENT_REPO }}
+          token: ${{ secrets.CONTENT_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Download prep artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: prep
+
+      - name: Cache Blender
+        uses: actions/cache@v4
+        with:
+          path: ~/blender
+          key: blender-4.2.1-linux-x64
+
+      - name: Install Blender (only if 3D shots planned)
+        if: ${{ needs.prep.outputs.has_blender == 'true' }}
+        run: |
+          if [ ! -x "$HOME/blender/blender" ]; then
+            mkdir -p "$HOME/blender"
+            curl -sSL https://download.blender.org/release/Blender4.2/blender-4.2.1-linux-x64.tar.xz -o /tmp/blender.tar.xz
+            tar -xJf /tmp/blender.tar.xz -C "$HOME/blender" --strip-components=1
+          fi
+          echo "$HOME/blender" >> $GITHUB_PATH
+
+      - name: Render Blender shots
+        if: ${{ needs.prep.outputs.has_blender == 'true' }}
+        run: python ci.py blender "${{ github.event.inputs.episode }}"
+
+      - name: Upload Blender clips
+        if: ${{ needs.prep.outputs.has_blender == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: blender-clips
+          path: episodes/${{ github.event.inputs.episode }}/video/**
+          if-no-files-found: ignore
+          retention-days: 1
+
+  render:
+    needs: [prep, blender]
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+
+    strategy:
+      fail-fast: false
+      max-parallel: 18
+      matrix: ${{ fromJSON(needs.prep.outputs.matrix) }}
+
+    steps:
+      - name: Checkout content repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ secrets.CONTENT_REPO }}
+          token: ${{ secrets.CONTENT_TOKEN }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Cache Node modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      - name: Cache Remotion browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/remotion
+          key: ${{ runner.os }}-remotion-browser
+
+      - name: Install Node dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Download prep artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: prep
+
+      - name: Download Blender clips
+        if: ${{ needs.prep.outputs.has_blender == 'true' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: blender-clips
+          path: episodes/${{ github.event.inputs.episode }}/video
+
+      - name: Render shard ${{ matrix.shard }}
+        run: >
+          python ci.py render-shard
+          "${{ github.event.inputs.episode }}"
+          ${{ matrix.shard }}
+          ${{ matrix.start }}
+          ${{ matrix.end }}
+
+      - name: Upload segment
+        uses: actions/upload-artifact@v4
+        with:
+          name: segment-${{ matrix.shard }}
+          path: out/seg-${{ matrix.shard }}.mp4
+          if-no-files-found: error
+          retention-days: 1
+
+  gather:
+    needs: render
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout content repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ secrets.CONTENT_REPO }}
+          token: ${{ secrets.CONTENT_TOKEN }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Download prep artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: prep
+
+      - name: Download all segments
+        uses: actions/download-artifact@v4
+        with:
+          pattern: segment-*
+          merge-multiple: true
+          path: segments
+
+      - name: Gather, mux audio, thumbnail, upload
+        env:
+          RCLONE_CONFIG: ${{ secrets.RCLONE_CONFIG }}
+          RCLONE_REMOTE: ${{ secrets.RCLONE_REMOTE }}
+        run: python ci.py gather "${{ github.event.inputs.episode }}"
