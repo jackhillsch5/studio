@@ -58,9 +58,6 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      - name: Install ffmpeg
-        run: sudo apt-get update -y && sudo apt-get install -y ffmpeg
-
       - name: Prepare episode (whisper, timing, plan, shard ranges)
         id: prep
         env:
@@ -102,10 +99,6 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: prep
-
-      - name: Install ffmpeg
-        if: ${{ needs.prep.outputs.has_blender == 'true' }}
-        run: sudo apt-get update -y && sudo apt-get install -y ffmpeg
 
       - name: Cache Blender
         uses: actions/cache@v4
@@ -237,11 +230,27 @@ jobs:
           python-version: "3.11"
           cache: pip
 
+      - name: Cache Node modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      - name: Cache Remotion browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/remotion
+          key: ${{ runner.os }}-remotion-browser
+
+      - name: Install Node dependencies
+        run: npm install --no-audit --no-fund
+
       - name: Install Python dependencies
         run: pip install -r requirements.txt
-
-      - name: Install ffmpeg
-        run: sudo apt-get update -y && sudo apt-get install -y ffmpeg
 
       - name: Download prep artifact
         uses: actions/download-artifact@v4
