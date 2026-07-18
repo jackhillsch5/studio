@@ -63,7 +63,7 @@ jobs:
         env:
           RCLONE_CONFIG: ${{ secrets.RCLONE_CONFIG }}
           RCLONE_REMOTE: ${{ secrets.RCLONE_REMOTE }}
-          VIDEO_DRIVE_SUBDIR: ${{ vars.VIDEO_DRIVE_SUBDIR }}
+          VIDEO_DRIVE_SUBDIR: ${{ secrets.VIDEO_DRIVE_SUBDIR }}
           WHISPER_MODEL: ${{ vars.WHISPER_MODEL }}
         run: python ci.py prep "${{ github.event.inputs.episode }}"
 
@@ -249,5 +249,5 @@ jobs:
         env:
           RCLONE_CONFIG: ${{ secrets.RCLONE_CONFIG }}
           RCLONE_REMOTE: ${{ secrets.RCLONE_REMOTE }}
-          VIDEO_DRIVE_SUBDIR: ${{ vars.VIDEO_DRIVE_SUBDIR }}
+          VIDEO_DRIVE_SUBDIR: ${{ secrets.VIDEO_DRIVE_SUBDIR }}
         run: python ci.py gather "${{ github.event.inputs.episode }}"
