@@ -60,6 +60,11 @@ jobs:
 
       - name: Prepare episode (whisper, timing, plan, shard ranges)
         id: prep
+        env:
+          RCLONE_CONFIG: ${{ secrets.RCLONE_CONFIG }}
+          RCLONE_REMOTE: ${{ secrets.RCLONE_REMOTE }}
+          VIDEO_DRIVE_SUBDIR: ${{ vars.VIDEO_DRIVE_SUBDIR }}
+          WHISPER_MODEL: ${{ vars.WHISPER_MODEL }}
         run: python ci.py prep "${{ github.event.inputs.episode }}"
 
       - name: Upload prep artifact
@@ -68,7 +73,7 @@ jobs:
           name: prep
           path: |
             out/**
-            public/**
+            public/episodes/**
           if-no-files-found: warn
           retention-days: 1
 
@@ -120,7 +125,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: blender-clips
-          path: episodes/${{ github.event.inputs.episode }}/video/**
+          path: public/episodes/${{ github.event.inputs.episode }}/video/**
           if-no-files-found: ignore
           retention-days: 1
 
@@ -184,7 +189,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: blender-clips
-          path: episodes/${{ github.event.inputs.episode }}/video
+          path: public/episodes/${{ github.event.inputs.episode }}/video
 
       - name: Render shard ${{ matrix.shard }}
         run: >
@@ -244,4 +249,5 @@ jobs:
         env:
           RCLONE_CONFIG: ${{ secrets.RCLONE_CONFIG }}
           RCLONE_REMOTE: ${{ secrets.RCLONE_REMOTE }}
+          VIDEO_DRIVE_SUBDIR: ${{ vars.VIDEO_DRIVE_SUBDIR }}
         run: python ci.py gather "${{ github.event.inputs.episode }}"
