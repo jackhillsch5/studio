@@ -1,0 +1,62 @@
+name: Fetch assets (download bundle)
+
+# Public orchestrator that DOWNLOADS the asset packs and hands you a zip.
+#
+# Runs from THIS public repo (free CI minutes). It checks out the private content
+# repo, runs the existing fetch + index scripts (which pull BOTH the icon packs
+# AND the Kenney kits), then uploads a lean zip of the fetched images as a build
+# artifact you can download from the run page and drop into chat for review.
+#
+# The bundle intentionally includes only 2D images (png/svg) + manifest/licenses,
+# and EXCLUDES the heavy 3D model formats (FBX/GLB/OBJ) and the raw kit .zip, so
+# the download stays small and focused on what actually gets used on screen.
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: fetch-assets
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout content repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ secrets.CONTENT_REPO }}
+          token: ${{ secrets.CONTENT_TOKEN }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Fetch asset packs (icons + Kenney)
+        run: |
+          node assetpack/scripts/fetch-assets.mjs
+          node assetpack/scripts/index-assets.mjs
+
+      - name: Report what was fetched
+        run: |
+          echo "Image files fetched:"
+          find assetpack/assets -type f \( -iname '*.png' -o -iname '*.svg' \) | wc -l
+          echo "Top-level asset folders:"
+          ls -la assetpack/assets || true
+
+      - name: Build lean download bundle (images + manifest + licenses only)
+        run: |
+          find assetpack/assets -type f \
+            \( -iname '*.png' -o -iname '*.svg' -o -iname 'manifest.json' -o -iname 'LICENSE*.txt' \) \
+            -print0 | xargs -0 zip -q assets-bundle.zip
+          echo "Bundle size:"; du -h assets-bundle.zip
+
+      - name: Upload asset bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: assets-bundle
+          path: assets-bundle.zip
+          retention-days: 7
