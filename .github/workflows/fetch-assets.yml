@@ -1,8 +1,9 @@
 name: Fetch assets -> vidgen
 
-# Runs in the PUBLIC studio repo (CI has internet). Vendors CC0/MIT/ISC assets
-# and commits them into the PRIVATE vidgen content repo so renders are fully
-# offline/deterministic and no asset is fetched at render time.
+# Runs in the PUBLIC studio repo (CI has internet). Vendors CC0/MIT/ISC assets,
+# regenerates the drawn-icon module from them, and commits everything into the
+# PRIVATE vidgen content repo so renders are fully offline/deterministic and no
+# asset is fetched at render time.
 #
 # Required repo secrets (already used by ci.py):
 #   CONTENT_REPO   e.g. "your-org/vidgen"   (the private repo)
@@ -24,7 +25,7 @@ jobs:
   fetch:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout studio (this repo — holds the fetch script)
+      - name: Checkout studio (this repo - holds the fetch script)
         uses: actions/checkout@v4
 
       - name: Checkout vidgen (private content repo)
@@ -42,10 +43,14 @@ jobs:
       - name: Fetch + normalize assets into vidgen
         run: node scripts/fetch-assets.mjs --repo vidgen --packs "${{ github.event.inputs.packs }}"
 
+      - name: Regenerate drawn-icon module from the freshly-synced assets
+        working-directory: vidgen
+        run: node scripts/gen-icons.mjs
+
       - name: Show what changed
         working-directory: vidgen
         run: |
-          git status --porcelain assets src/assets-manifest.json ASSETS-LICENSES.md
+          git status --porcelain assets src/assets-manifest.json src/generated/icons.ts ASSETS-LICENSES.md
           echo "---- manifest ----"
           cat src/assets-manifest.json | head -60
 
@@ -55,11 +60,11 @@ jobs:
         run: |
           git config user.name "asset-bot"
           git config user.email "asset-bot@users.noreply.github.com"
-          git add assets src/assets-manifest.json ASSETS-LICENSES.md
+          git add assets src/assets-manifest.json src/generated/icons.ts ASSETS-LICENSES.md
           if git diff --cached --quiet; then
-            echo "No asset changes to commit."
+            echo "No asset or icon changes to commit."
           else
-            git commit -m "chore(assets): sync CC0/MIT/ISC assets [skip ci]"
+            git commit -m "chore(assets): sync assets + regenerate drawn-icon module [skip ci]"
             git push
           fi
 
@@ -70,5 +75,6 @@ jobs:
           path: |
             vidgen/assets/**
             vidgen/src/assets-manifest.json
+            vidgen/src/generated/icons.ts
             vidgen/ASSETS-LICENSES.md
-          if-no-files-found: warn
+          if-no-files-found: war
