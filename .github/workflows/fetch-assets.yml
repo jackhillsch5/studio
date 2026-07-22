@@ -1,62 +1,74 @@
-name: Fetch assets (download bundle)
+name: Fetch assets -> vidgen
 
-# Public orchestrator that DOWNLOADS the asset packs and hands you a zip.
+# Runs in the PUBLIC studio repo (CI has internet). Vendors CC0/MIT/ISC assets
+# and commits them into the PRIVATE vidgen content repo so renders are fully
+# offline/deterministic and no asset is fetched at render time.
 #
-# Runs from THIS public repo (free CI minutes). It checks out the private content
-# repo, runs the existing fetch + index scripts (which pull BOTH the icon packs
-# AND the Kenney kits), then uploads a lean zip of the fetched images as a build
-# artifact you can download from the run page and drop into chat for review.
-#
-# The bundle intentionally includes only 2D images (png/svg) + manifest/licenses,
-# and EXCLUDES the heavy 3D model formats (FBX/GLB/OBJ) and the raw kit .zip, so
-# the download stays small and focused on what actually gets used on screen.
+# Required repo secrets (already used by ci.py):
+#   CONTENT_REPO   e.g. "your-org/vidgen"   (the private repo)
+#   CONTENT_TOKEN  a PAT / fine-grained token with contents:write on CONTENT_REPO
 
 on:
-  workflow_dispatch: {}
-
-concurrency:
-  group: fetch-assets
-  cancel-in-progress: false
+  workflow_dispatch:
+    inputs:
+      packs:
+        description: 'Packs to sync ("all" or comma list: lucide,tabler,open-doodles)'
+        default: 'all'
+        required: true
+      push:
+        description: 'Commit + push results to the vidgen repo'
+        type: boolean
+        default: true
 
 jobs:
   fetch:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-
     steps:
-      - name: Checkout content repo
+      - name: Checkout studio (this repo — holds the fetch script)
+        uses: actions/checkout@v4
+
+      - name: Checkout vidgen (private content repo)
         uses: actions/checkout@v4
         with:
           repository: ${{ secrets.CONTENT_REPO }}
           token: ${{ secrets.CONTENT_TOKEN }}
+          path: vidgen
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: '20'
 
-      - name: Fetch asset packs (icons + Kenney)
+      - name: Fetch + normalize assets into vidgen
+        run: node scripts/fetch-assets.mjs --repo vidgen --packs "${{ github.event.inputs.packs }}"
+
+      - name: Show what changed
+        working-directory: vidgen
         run: |
-          node assetpack/scripts/fetch-assets.mjs
-          node assetpack/scripts/index-assets.mjs
+          git status --porcelain assets src/assets-manifest.json ASSETS-LICENSES.md
+          echo "---- manifest ----"
+          cat src/assets-manifest.json | head -60
 
-      - name: Report what was fetched
+      - name: Commit + push to vidgen
+        if: ${{ github.event.inputs.push == 'true' }}
+        working-directory: vidgen
         run: |
-          echo "Image files fetched:"
-          find assetpack/assets -type f \( -iname '*.png' -o -iname '*.svg' \) | wc -l
-          echo "Top-level asset folders:"
-          ls -la assetpack/assets || true
+          git config user.name "asset-bot"
+          git config user.email "asset-bot@users.noreply.github.com"
+          git add assets src/assets-manifest.json ASSETS-LICENSES.md
+          if git diff --cached --quiet; then
+            echo "No asset changes to commit."
+          else
+            git commit -m "chore(assets): sync CC0/MIT/ISC assets [skip ci]"
+            git push
+          fi
 
-      - name: Build lean download bundle (images + manifest + licenses only)
-        run: |
-          find assetpack/assets -type f \
-            \( -iname '*.png' -o -iname '*.svg' -o -iname 'manifest.json' -o -iname 'LICENSE*.txt' \) \
-            -print0 | xargs -0 zip -q assets-bundle.zip
-          echo "Bundle size:"; du -h assets-bundle.zip
-
-      - name: Upload asset bundle
+      - name: Upload assets artifact (for review / when push=false)
         uses: actions/upload-artifact@v4
         with:
-          name: assets-bundle
-          path: assets-bundle.zip
-          retention-days: 7
+          name: vidgen-assets
+          path: |
+            vidgen/assets/**
+            vidgen/src/assets-manifest.json
+            vidgen/ASSETS-LICENSES.md
+          if-no-files-found: warn
