@@ -77,4 +77,4 @@ jobs:
             vidgen/src/assets-manifest.json
             vidgen/src/generated/icons.ts
             vidgen/ASSETS-LICENSES.md
-          if-no-files-found: war
+          if-no-files-found: warn
